@@ -1,0 +1,100 @@
+// This declarative Jenkins pipeline is designed to run CI tests for the dps-datamart processes
+
+// Global definitions (change these per repo)
+def slack_channel="py-project-template"
+def git_repo="https://github.com/Cytoreason/py-project-template.git"
+
+// Global definitions (No need to change these per repo)
+def author = ""
+def message = ""
+def summary = ""
+def success_message = ""
+def failure_message = ""
+def failure_details = ""
+
+def getAuthor = {
+    def commit = sh(returnStdout: true, script: 'git rev-parse HEAD')
+    author = sh(returnStdout: true, script: "git --no-pager show -s --format='%an' ${commit}").trim()
+}
+
+def getLastCommitMsg = {
+    message = sh(returnStdout: true, script: 'git log -1 --pretty=%B').trim()
+}
+
+
+pipeline {
+
+    agent { node { label 'cyto-cc-agent' } }
+
+    stages {
+
+        stage ('Start') {
+            steps {
+                script {
+                    getAuthor()
+                    getLastCommitMsg()
+                }
+                // send build started notifications
+                slackSend (
+                    channel: "${slack_channel}",
+                    color: 'warning',
+                    message: """_*STARTED*_
+                    | *Job*: <${env.BUILD_URL}|${env.JOB_NAME.replaceAll("%2F", "/")} [${env.BUILD_NUMBER}]>
+                    | *Branch*: ${env.GIT_BRANCH}
+                    | *Author*: ${author}
+                    | *Last Commit*: <${git_repo}/commit/${env.GIT_COMMIT}|${message}>""".stripMargin()
+                )}
+        }
+
+
+        stage('Setup environment') {
+            steps {
+                sh "chmod +x setup.sh"
+                sh "./setup.sh"
+                sh 'sed "s/\\(.*_SECRET_.*=...\\).*\\(...\\)/\\1\\.\\.\\.\\2/" .env' // Print out .env without disclosing secrets
+             }
+        }
+
+        stage('Local docker-compose tests') {
+            steps {
+                sh "docker-compose build"
+                sh "docker-compose ps"
+                // Using "docker-compose run" ensures that docker-compose exit code will be inherited from
+                // the service it runs.
+                sh "docker-compose run tests"
+            }
+        }
+    }
+    post {
+        success {
+            slackSend (
+                channel: "${slack_channel}",
+                color: 'good',
+                message: """_*SUCCESSFUL*_
+                | *Job*: <${env.BUILD_URL}|${env.JOB_NAME.replaceAll("%2F", "/")} [${env.BUILD_NUMBER}]>
+                | *Branch*: ${env.GIT_BRANCH}
+                | *Author*: ${author}
+                | *Last Commit*: <${git_repo}/commit/${env.GIT_COMMIT}|${message}>""".stripMargin()
+            )        }
+
+        failure {
+            slackSend (
+                channel: "${slack_channel}",
+                color: 'danger',
+                message: """_*FAILED*_
+                | *Job*: <${env.BUILD_URL}|${env.JOB_NAME.replaceAll("%2F", "/")} [${env.BUILD_NUMBER}]>
+                | *Branch*: ${env.GIT_BRANCH}
+                | *Author*: ${author}
+                | *Last Commit*: <${git_repo}/commit/${env.GIT_COMMIT}|${message}>""".stripMargin()
+            )
+        }
+      always {
+          // Generate timestamped logs of any docker-compose services
+          sh "docker-compose logs -t"
+          // Stop and remove containers, networks, volumes, and images created by docker-compose
+          sh "docker-compose down --rmi all -v --remove-orphans"
+          // clean up our workspace
+          deleteDir()
+      }
+    }
+}

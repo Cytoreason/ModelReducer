@@ -1,0 +1,21 @@
+version: '3'
+secrets:
+  credentials.json:
+    file: ${GOOGLE_APPLICATION_CREDENTIALS}
+services:
+  tests:
+    build:
+      context: .
+      args:
+        - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/credentials.json
+      secrets:
+        - source: credentials.json
+    env_file: .env
+    environment:
+      - CLIENT=Machine
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/creds/credentials.json
+      - PYTHONPYCACHEPREFIX=/tmp/__pycache__
+    command: ["bash", "-c", "poetry install --only test && poetry run pytest --cov"]
+    volumes:
+      - ./creds/:/app/creds
+      - ./tests/:/app/tests

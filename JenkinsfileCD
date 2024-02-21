@@ -1,0 +1,4 @@
+@Library('common-cr-pipeline@master') _
+withEnv(['PATCH_FILES=NONE']) {
+   cr_cd_pipeline()
+}
